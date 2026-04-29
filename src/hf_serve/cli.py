@@ -289,3 +289,33 @@ def pull(
         raise typer.Exit(1)
 
     state.close()
+
+
+@app.command()
+def serve(
+    host: Annotated[
+        str,
+        typer.Option("--host", "-H", help="Bind address"),
+    ] = "0.0.0.0",
+    port: Annotated[
+        int,
+        typer.Option("--port", "-p", help="Bind port"),
+    ] = 8080,
+) -> None:
+    """Start the HTTP API server."""
+    import uvicorn
+
+    from hf_serve.server import app_state as server_state
+    from hf_serve.server import create_app_from_state
+
+    # Pre-populate server state from CLI context (config already loaded)
+    server_state.config = ctx.config
+    server_state.state = ctx.state
+
+    server_app = create_app_from_state()
+
+    console.print(
+        f"Starting hf-serve server on [cyan]http://{host}:{port}[/cyan]"
+    )
+
+    uvicorn.run(server_app, host=host, port=port, log_level="info")
