@@ -14,6 +14,7 @@ from hf_serve.config import AppConfig, load_config
 from hf_serve.models import EntryStatus
 from hf_serve.state import StateStore
 from hf_serve.storage import get_current_link, read_manifest
+from hf_serve.pull import pull_local, pull_rsync
 from hf_serve.sync import sync_all, sync_entry
 from hf_serve.util import human_size, setup_logging
 
@@ -216,4 +217,75 @@ def manifest(
         raise typer.Exit(1)
 
     console.print_json(m.model_dump_json(indent=2))
+    state.close()
+
+
+@app.command()
+def pull(
+    entry: Annotated[str, typer.Argument(help="Entry name")],
+    target: Annotated[Path, typer.Argument(help="Target directory to pull into")],
+    source: Annotated[
+        Optional[Path],
+        typer.Option("--source", "-s", help="Local hf-serve storage root"),
+    ] = None,
+    server: Annotated[
+        Optional[str],
+        typer.Option("--server", help="Remote server hostname for rsync"),
+    ] = None,
+    no_delete: Annotated[
+        bool,
+        typer.Option("--no-delete", help="Don't remove stale files in target"),
+    ] = False,
+) -> None:
+    """Pull a synced entry into a local directory.
+
+    Use --source for local pulls, --server for rsync pulls.
+    If neither is given, --source defaults to the config's storage root.
+    """
+    cfg, state = ctx.config, ctx.state
+
+    if entry not in cfg.entries:
+        err_console.print(f"[bold red]Error:[/] Unknown entry: {entry}")
+        raise typer.Exit(1)
+
+    delete = not no_delete
+
+    if server:
+        # Rsync mode
+        storage_root = source or cfg.storage.root
+        console.print(
+            f"Pulling [cyan]{entry}[/cyan] from [yellow]{server}[/yellow] "
+            f"via rsync → {target}"
+        )
+        with console.status(f"Pulling [cyan]{entry}[/cyan]...", spinner="dots"):
+            result = pull_rsync(
+                entry=entry,
+                target=target,
+                server=server,
+                source=storage_root,
+                delete=delete,
+            )
+    else:
+        # Local mode
+        storage_root = source or cfg.storage.root
+        console.print(
+            f"Pulling [cyan]{entry}[/cyan] from {storage_root} → {target}"
+        )
+        with console.status(f"Pulling [cyan]{entry}[/cyan]...", spinner="dots"):
+            result = pull_local(
+                entry=entry,
+                target=target,
+                source=storage_root,
+                delete=delete,
+            )
+
+    if result.success:
+        console.print(
+            f"[green]✓[/green] {entry}: pulled "
+            f"({result.file_count} files, {human_size(result.total_size or 0)})"
+        )
+    else:
+        err_console.print(f"[red]✗[/red] {entry}: {result.error}")
+        raise typer.Exit(1)
+
     state.close()

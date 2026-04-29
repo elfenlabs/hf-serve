@@ -11,3 +11,4 @@ wheels/
 
 # Local test configs
 test-config.yaml
+.local
