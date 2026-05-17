@@ -14,6 +14,7 @@ from hf_serve.config import AppConfig, load_config
 from hf_serve.models import EntryStatus
 from hf_serve.state import StateStore
 from hf_serve.storage import get_current_link, read_manifest
+from hf_serve.gc import gc_all
 from hf_serve.pull import pull_local, pull_rsync
 from hf_serve.sync import sync_all, sync_entry
 from hf_serve.util import human_size, setup_logging
@@ -289,6 +290,48 @@ def pull(
         raise typer.Exit(1)
 
     state.close()
+
+
+@app.command()
+def gc(
+    keep_revisions: Annotated[
+        int,
+        typer.Option("--keep-revisions", "-k", help="Number of revisions to keep per entry"),
+    ] = 2,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would be removed without deleting"),
+    ] = False,
+) -> None:
+    """Remove old revisions, keeping current and newest N per entry."""
+    cfg = ctx.config
+
+    mode = "[yellow]DRY RUN[/yellow] " if dry_run else ""
+    console.print(f"{mode}Running garbage collection (keep={keep_revisions})...")
+
+    result = gc_all(cfg, keep_revisions=keep_revisions, dry_run=dry_run)
+
+    for name, entry_result in result.entries.items():
+        if entry_result.removed:
+            freed = human_size(entry_result.freed_bytes)
+            verb = "would remove" if dry_run else "removed"
+            console.print(
+                f"  [cyan]{name}[/cyan]: {verb} {len(entry_result.removed)} revision(s) "
+                f"({freed}), kept {len(entry_result.kept)}"
+            )
+            for rev in entry_result.removed:
+                console.print(f"    [dim]- {rev}[/dim]")
+        else:
+            console.print(f"  [cyan]{name}[/cyan]: nothing to remove")
+
+    console.print()
+    total_freed = human_size(result.total_freed_bytes)
+    verb = "Would free" if dry_run else "Freed"
+    console.print(
+        f"{verb} {total_freed} across {result.total_removed} revision(s)."
+    )
+
+    ctx.state.close()
 
 
 @app.command()

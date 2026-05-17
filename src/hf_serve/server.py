@@ -9,9 +9,12 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from hf_serve.config import AppConfig, load_config
+from hf_serve.gc import gc_all
+from hf_serve.metrics import generate_metrics
 from hf_serve.models import EntryStatus
 from hf_serve.state import StateStore
 from hf_serve.storage import get_current_link, read_manifest
@@ -68,6 +71,19 @@ class SyncAllResponse(BaseModel):
     results: list[SyncResponse]
     success_count: int
     failure_count: int
+
+
+class GCEntryDetail(BaseModel):
+    entry: str
+    kept: list[str]
+    removed: list[str]
+    freed_bytes: int
+
+
+class GCResponse(BaseModel):
+    entries: list[GCEntryDetail]
+    total_removed: int
+    total_freed_bytes: int
 
 
 # ── App state container ─────────────────────────────────────────────────────
@@ -255,3 +271,30 @@ def _register_routes(app: FastAPI) -> None:
             success_count=results.success_count,
             failure_count=results.failure_count,
         )
+
+    @app.post("/v1/gc", response_model=GCResponse)
+    async def run_gc(
+        keep_revisions: int = 2,
+        dry_run: bool = False,
+    ) -> GCResponse:
+        cfg = app_state.config
+
+        result = gc_all(cfg, keep_revisions=keep_revisions, dry_run=dry_run)
+
+        return GCResponse(
+            entries=[
+                GCEntryDetail(
+                    entry=er.entry,
+                    kept=er.kept,
+                    removed=er.removed,
+                    freed_bytes=er.freed_bytes,
+                )
+                for er in result.entries.values()
+            ],
+            total_removed=result.total_removed,
+            total_freed_bytes=result.total_freed_bytes,
+        )
+
+    @app.get("/metrics", response_class=PlainTextResponse)
+    async def metrics() -> str:
+        return generate_metrics(app_state.config, app_state.state)
