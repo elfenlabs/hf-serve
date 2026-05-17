@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hf-serve.fullname" . }}
+  labels:
+    {{- include "hf-serve.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.server.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hf-serve.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hf-serve.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: hf-serve
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/hf-serve/config.yaml"
+            - "serve"
+            - "--host"
+            - {{ .Values.server.host | quote }}
+            - "--port"
+            - {{ .Values.server.port | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          env:
+            {{- if .Values.hfTokenSecret }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hfTokenSecret }}
+                  key: HF_TOKEN
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/hf-serve
+              readOnly: true
+            - name: data
+              mountPath: /data/hf-serve
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "hf-serve.fullname" . }}-config
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "hf-serve.fullname" . }}-data
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

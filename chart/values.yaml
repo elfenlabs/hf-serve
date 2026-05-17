@@ -1,0 +1,73 @@
+image:
+  repository: hf-serve
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# -- Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  replicas: 1
+
+# -- Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+# -- Persistent storage for synced models
+persistence:
+  enabled: true
+  size: 500Gi
+  # -- Leave empty to use cluster default storage class
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+
+# -- Collection configuration (rendered into ConfigMap)
+# This is the same YAML format as the hf-serve config file.
+collection:
+  storage:
+    root: /data/hf-serve
+
+  entries: {}
+  #  qwen3-32b-awq:
+  #    repository: Qwen/Qwen3-32B-AWQ
+  #    allow_patterns:
+  #      - "*.json"
+  #      - "*.safetensors"
+  #      - "tokenizer.*"
+  #    ignore_patterns:
+  #      - "*.bin"
+  #      - "*.gguf"
+
+# -- Hugging Face authentication
+# Reference an existing Secret containing a `HF_TOKEN` key.
+# Set to "" to disable.
+hfTokenSecret: ""
+
+# -- Periodic sync CronJob
+cronjob:
+  enabled: true
+  schedule: "0 * * * *"
+  # -- Number of successful/failed job history to keep
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+# -- Pod-level settings
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,69 @@
+{{- if .Values.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hf-serve.fullname" . }}-sync
+  labels:
+    {{- include "hf-serve.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "hf-serve.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sync
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - "--config"
+                - "/etc/hf-serve/config.yaml"
+                - "sync"
+              env:
+                {{- if .Values.hfTokenSecret }}
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.hfTokenSecret }}
+                      key: HF_TOKEN
+                {{- end }}
+              resources:
+                {{- toYaml .Values.cronjob.resources | nindent 16 }}
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/hf-serve
+                  readOnly: true
+                - name: data
+                  mountPath: /data/hf-serve
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "hf-serve.fullname" . }}-config
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ include "hf-serve.fullname" . }}-data
+            {{- else }}
+            - name: data
+              emptyDir: {}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
