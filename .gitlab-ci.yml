@@ -1,0 +1,46 @@
+stages:
+  - build-images
+
+build-hf-serve:
+  stage: build-images
+  image:
+    name: moby/buildkit:rootless
+    entrypoint: [""]
+  variables:
+    BUILDKITD_FLAGS: --oci-worker-no-process-sandbox
+  script:
+    - mkdir -p ~/.docker
+    - |
+      cat > ~/.docker/config.json <<EOF
+      {
+        "auths": {
+          "$CI_REGISTRY": {
+            "username": "$CI_REGISTRY_USER",
+            "password": "$CI_REGISTRY_PASSWORD"
+          }
+        }
+      }
+      EOF
+    - |
+      IMAGE_NAME="$CI_REGISTRY_IMAGE"
+      NAMES="name=$IMAGE_NAME:$CI_COMMIT_SHA"
+      
+      # Only push the 'latest' tag if we are on the default branch
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        NAMES="$NAMES,name=$IMAGE_NAME:latest"
+      fi
+      
+      buildctl-daemonless.sh build \
+        --frontend dockerfile.v0 \
+        --local context=. \
+        --local dockerfile=. \
+        --import-cache type=registry,ref=$IMAGE_NAME:buildcache \
+        --export-cache type=registry,ref=$IMAGE_NAME:buildcache,mode=max \
+        --output "type=image,$NAMES,push=true"
+  rules:
+    - changes:
+        - Dockerfile
+        - pyproject.toml
+        - uv.lock
+        - src/**/*
+        - .gitlab-ci.yml
