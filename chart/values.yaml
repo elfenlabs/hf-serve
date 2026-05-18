@@ -67,6 +67,13 @@ service:
   type: ClusterIP
   port: 8080
 
+# -- ServiceMonitor configuration for Prometheus Operator
+serviceMonitor:
+  enabled: false
+  interval: 1m
+  labels: {}
+  # scrapeTimeout: 10s
+
 # -- Pod-level settings
 nodeSelector: {}
 tolerations: []
