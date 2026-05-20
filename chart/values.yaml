@@ -32,6 +32,14 @@ collection:
   storage:
     root: /data/hf-serve
 
+  sync:
+    interval_seconds: 3600
+    default_revision: main
+    # Limit number of parallel file downloads (set to 1 for sequential download)
+    # max_workers: 1
+    # Limit raw bandwidth speed per stream (e.g. "500KB", "2MB", "5M", or integer bytes)
+    # bandwidth_limit: "5MB"
+
   entries: {}
   #  qwen3-32b-awq:
   #    repository: Qwen/Qwen3-32B-AWQ
@@ -73,6 +81,11 @@ serviceMonitor:
   interval: 1m
   labels: {}
   # scrapeTimeout: 10s
+
+# -- Extra annotations to add to the pod template.
+# Useful for CNI bandwidth limits, e.g.:
+#   kubernetes.io/ingress-bandwidth: "50M"
+podAnnotations: {}
 
 # -- Pod-level settings
 nodeSelector: {}

@@ -83,3 +83,41 @@ class TestLoadConfig:
 
         with pytest.raises(ValueError, match="YAML mapping"):
             load_config(config_file)
+
+
+class TestParseBandwidthLimit:
+    def test_parse_valid_limits(self) -> None:
+        from hf_serve.util import parse_bandwidth_limit
+
+        assert parse_bandwidth_limit(None) is None
+        assert parse_bandwidth_limit("") is None
+        assert parse_bandwidth_limit(1024) == 1024
+        assert parse_bandwidth_limit("1024") == 1024
+        assert parse_bandwidth_limit("500KB") == 500 * 1024
+        assert parse_bandwidth_limit("5MB") == 5 * 1024 * 1024
+        assert parse_bandwidth_limit("5M") == 5 * 1024 * 1024
+        assert parse_bandwidth_limit("1.5gb") == int(1.5 * 1024 * 1024 * 1024)
+
+    def test_parse_invalid_limits(self) -> None:
+        from hf_serve.util import parse_bandwidth_limit
+
+        with pytest.raises(ValueError, match="Invalid bandwidth limit format"):
+            parse_bandwidth_limit("invalid")
+
+        with pytest.raises(ValueError, match="Invalid bandwidth limit format"):
+            parse_bandwidth_limit("500X")
+
+
+class TestSyncConfigThrottling:
+    def test_sync_config_fields(self, tmp_root: Path) -> None:
+        config = AppConfig(
+            storage={"root": str(tmp_root)},
+            sync={
+                "max_workers": 2,
+                "bandwidth_limit": "2MB",
+            },
+            entries={"m": {"repository": "org/model"}},
+        )
+        assert config.sync.max_workers == 2
+        assert config.sync.bandwidth_limit == "2MB"
+

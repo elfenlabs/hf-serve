@@ -118,8 +118,10 @@ def sync_entry(config: AppConfig, entry_name: str, state: StateStore) -> SyncRes
                 ignore_patterns=entry_config.ignore_patterns,
                 cache_dir=str(config.storage.hf_cache),
                 token=hf_token,
+                max_workers=config.sync.max_workers,
             )
         )
+
 
         # Extract commit hash
         commit_hash = _extract_commit_hash(snapshot_path)

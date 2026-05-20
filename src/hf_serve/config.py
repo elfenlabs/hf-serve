@@ -26,6 +26,9 @@ class SyncConfig(BaseModel):
 
     interval_seconds: int = 3600
     default_revision: str = "main"
+    max_workers: int | None = None
+    bandwidth_limit: str | int | None = None
+
 
 
 class EntryConfig(BaseModel):
@@ -93,4 +96,15 @@ def load_config(path: Path) -> AppConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
 
-    return AppConfig(**raw)
+    cfg = AppConfig(**raw)
+
+    # Configure global HTTP rate limit if configured
+    if cfg.sync.bandwidth_limit:
+        from hf_serve.http import configure_hf_client
+        from hf_serve.util import parse_bandwidth_limit
+
+        limit_bytes = parse_bandwidth_limit(cfg.sync.bandwidth_limit)
+        configure_hf_client(limit_bytes)
+
+    return cfg
+
