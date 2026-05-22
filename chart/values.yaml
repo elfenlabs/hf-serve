@@ -91,3 +91,21 @@ podAnnotations: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# -- SSH/Rsync client pull gateway settings
+gateway:
+  enabled: false
+  # -- Port exposed by the gateway Service
+  port: 22
+  # -- Service type: LoadBalancer, NodePort, or ClusterIP
+  serviceType: LoadBalancer
+  # -- SSH authorized public keys (string or list of strings)
+  authorizedKeys: ""
+  # -- PUID and PGID for the ssh service container
+  puid: 1000
+  pgid: 1000
+  # -- Timezone
+  timezone: UTC
+  # -- Username for the SSH login
+  username: dgx
+

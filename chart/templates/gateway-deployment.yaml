@@ -1,0 +1,68 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hf-serve.fullname" . }}-gateway
+  labels:
+    {{- include "hf-serve.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hf-serve.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "hf-serve.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: lscr.io/linuxserver/openssh-server:latest
+          ports:
+            - name: ssh
+              containerPort: 2222
+              protocol: TCP
+          env:
+            - name: PUID
+              value: {{ .Values.gateway.puid | quote }}
+            - name: PGID
+              value: {{ .Values.gateway.pgid | quote }}
+            - name: TZ
+              value: {{ .Values.gateway.timezone | quote }}
+            - name: USER_NAME
+              value: {{ .Values.gateway.username | quote }}
+            {{- if .Values.gateway.authorizedKeys }}
+            - name: PUBLIC_KEY
+              value: {{ .Values.gateway.authorizedKeys | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.collection.storage.root }}
+              readOnly: true
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "hf-serve.fullname" . }}-data
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
