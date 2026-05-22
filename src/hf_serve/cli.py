@@ -31,11 +31,22 @@ err_console = Console(stderr=True)
 class _Ctx:
     """Shared context populated by the global callback."""
 
-    config: AppConfig
-    state: StateStore
+    config: AppConfig | None = None
+    state: StateStore | None = None
 
 
 ctx = _Ctx()
+
+
+def _require_config() -> tuple[AppConfig, StateStore]:
+    """Helper to enforce config exists for config-dependent commands."""
+    if ctx.config is None or ctx.state is None:
+        err_console.print(
+            "[bold red]Error:[/] Configuration file not found. Please provide one using "
+            "[cyan]--config / -c[/] or place it at [cyan]~/.config/hf-serve/config.yaml[/]"
+        )
+        raise typer.Exit(1)
+    return ctx.config, ctx.state
 
 
 @app.callback()
@@ -61,26 +72,21 @@ def main(
             if p.exists():
                 resolved_config = p
                 break
-        
-        if resolved_config is None:
-            err_console.print(
-                "[bold red]Error:[/] Configuration file not found. Please provide one using "
-                "[cyan]--config / -c[/] or place it at [cyan]~/.config/hf-serve/config.yaml[/]"
-            )
-            raise typer.Exit(1)
+        pass
 
-    try:
-        ctx.config = load_config(resolved_config)
-    except (FileNotFoundError, ValueError) as e:
-        err_console.print(f"[bold red]Error:[/] {e}")
-        raise typer.Exit(1)
-    ctx.state = StateStore(ctx.config.storage.root / "state.db")
+    if resolved_config is not None:
+        try:
+            ctx.config = load_config(resolved_config)
+            ctx.state = StateStore(ctx.config.storage.root / "state.db")
+        except (FileNotFoundError, ValueError) as e:
+            err_console.print(f"[bold red]Error:[/] {e}")
+            raise typer.Exit(1)
 
 
 @app.command(name="list")
 def list_() -> None:
     """List all configured entries and their sync status."""
-    cfg, state = ctx.config, ctx.state
+    cfg, state = _require_config()
 
     table = Table(title="hf-serve entries")
     table.add_column("ENTRY", style="cyan", no_wrap=True)
@@ -116,7 +122,7 @@ def status(
     entry: Annotated[Optional[str], typer.Argument(help="Entry name")] = None,
 ) -> None:
     """Show detailed status for an entry, or list all if no entry given."""
-    cfg, state = ctx.config, ctx.state
+    cfg, state = _require_config()
 
     if entry is None:
         list_()
@@ -167,7 +173,7 @@ def sync(
     entry: Annotated[Optional[str], typer.Argument(help="Entry to sync (omit for all)")] = None,
 ) -> None:
     """Sync one or all entries from Hugging Face."""
-    cfg, state = ctx.config, ctx.state
+    cfg, state = _require_config()
 
     if entry is not None:
         if entry not in cfg.entries:
@@ -223,7 +229,7 @@ def manifest(
     entry: Annotated[str, typer.Argument(help="Entry name")],
 ) -> None:
     """Display the manifest for an entry's current revision."""
-    cfg, state = ctx.config, ctx.state
+    cfg, state = _require_config()
 
     if entry not in cfg.entries:
         err_console.print(f"[bold red]Error:[/] Unknown entry: {entry}")
@@ -263,17 +269,24 @@ def pull(
     Use --source for local pulls, --server for rsync pulls.
     If neither is given, --source defaults to the config's storage root.
     """
-    cfg, state = ctx.config, ctx.state
-
-    if entry not in cfg.entries:
-        err_console.print(f"[bold red]Error:[/] Unknown entry: {entry}")
-        raise typer.Exit(1)
-
     delete = not no_delete
+
+    # Resolve the source path (storage root on source machine)
+    storage_root = source
+    if storage_root is None:
+        if ctx.config is not None:
+            storage_root = ctx.config.storage.root
+        else:
+            if server:
+                storage_root = Path("/data/hf-serve")
+            else:
+                err_console.print(
+                    "[bold red]Error:[/] Local pull requires a configuration file or explicit --source path."
+                )
+                raise typer.Exit(1)
 
     if server:
         # Rsync mode
-        storage_root = source or cfg.storage.root
         console.print(
             f"Pulling [cyan]{entry}[/cyan] from [yellow]{server}[/yellow] "
             f"via rsync → {target}"
@@ -288,7 +301,6 @@ def pull(
             )
     else:
         # Local mode
-        storage_root = source or cfg.storage.root
         console.print(
             f"Pulling [cyan]{entry}[/cyan] from {storage_root} → {target}"
         )
@@ -309,7 +321,8 @@ def pull(
         err_console.print(f"[red]✗[/red] {entry}: {result.error}")
         raise typer.Exit(1)
 
-    state.close()
+    if ctx.state is not None:
+        ctx.state.close()
 
 
 @app.command()
@@ -324,7 +337,7 @@ def gc(
     ] = False,
 ) -> None:
     """Remove old revisions, keeping current and newest N per entry."""
-    cfg = ctx.config
+    cfg, state = _require_config()
 
     mode = "[yellow]DRY RUN[/yellow] " if dry_run else ""
     console.print(f"{mode}Running garbage collection (keep={keep_revisions})...")
@@ -351,7 +364,7 @@ def gc(
         f"{verb} {total_freed} across {result.total_removed} revision(s)."
     )
 
-    ctx.state.close()
+    state.close()
 
 
 @app.command()
@@ -371,9 +384,11 @@ def serve(
     from hf_serve.server import app_state as server_state
     from hf_serve.server import create_app_from_state
 
+    cfg, state = _require_config()
+
     # Pre-populate server state from CLI context (config already loaded)
-    server_state.config = ctx.config
-    server_state.state = ctx.state
+    server_state.config = cfg
+    server_state.state = state
 
     server_app = create_app_from_state()
 
