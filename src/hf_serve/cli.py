@@ -41,16 +41,36 @@ ctx = _Ctx()
 @app.callback()
 def main(
     config: Annotated[
-        Path, typer.Option("--config", "-c", help="Path to config.yaml")
-    ],
+        Optional[Path], typer.Option("--config", "-c", help="Path to config.yaml")
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose output")
     ] = False,
 ) -> None:
     """Lightweight self-hosted Hugging Face model directory."""
     setup_logging(verbose)
+    
+    resolved_config = config
+    if resolved_config is None:
+        default_paths = [
+            Path("~/.config/hf-serve/config.yaml").expanduser(),
+            Path("~/.config/hf-serve.yaml").expanduser(),
+            Path("./config.yaml"),
+        ]
+        for p in default_paths:
+            if p.exists():
+                resolved_config = p
+                break
+        
+        if resolved_config is None:
+            err_console.print(
+                "[bold red]Error:[/] Configuration file not found. Please provide one using "
+                "[cyan]--config / -c[/] or place it at [cyan]~/.config/hf-serve/config.yaml[/]"
+            )
+            raise typer.Exit(1)
+
     try:
-        ctx.config = load_config(config)
+        ctx.config = load_config(resolved_config)
     except (FileNotFoundError, ValueError) as e:
         err_console.print(f"[bold red]Error:[/] {e}")
         raise typer.Exit(1)
