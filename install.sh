@@ -37,7 +37,9 @@ if ! command -v uv &> /dev/null; then
     
     # Source uv environment variables for current execution
     # shellcheck source=/dev/null
-    source "$HOME/.local/bin/env" || true
+    if [ -f "$HOME/.local/bin/env" ]; then
+        source "$HOME/.local/bin/env"
+    fi
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
@@ -54,8 +56,9 @@ if [ -f "pyproject.toml" ]; then
     uv tool install --force .
 else
     # Running directly via curl one-liner
-    uv tool install --force git+https://git.elfenlabs.com/elfenlabs/hf-serve.git
+    uv tool install --force git+https://github.com/elfenlabs/hf-serve.git
 fi
+
 
 # 5. Ensure ~/.local/bin is in PATH
 LOCAL_BIN="$HOME/.local/bin"
