@@ -84,37 +84,166 @@ def main(
 
 
 @app.command(name="list")
-def list_() -> None:
+def list_(
+    server: Annotated[
+        Optional[str],
+        typer.Option("--server", help="Remote server hostname for config-less list"),
+    ] = None,
+    source: Annotated[
+        Optional[Path],
+        typer.Option("--source", "-s", help="Remote hf-serve storage root"),
+    ] = None,
+) -> None:
     """List all configured entries and their sync status."""
-    cfg, state = _require_config()
+    import tempfile
+    import json
+    import subprocess
+    import shutil
+    from datetime import datetime, timezone
 
-    table = Table(title="hf-serve entries")
-    table.add_column("ENTRY", style="cyan", no_wrap=True)
-    table.add_column("REPOSITORY", style="white")
-    table.add_column("REVISION", style="dim")
-    table.add_column("STATUS", no_wrap=True)
-    table.add_column("SIZE", justify="right")
+    has_config = ctx.config is not None
 
-    status_map = {row.entry: row for row in state.list_statuses()}
+    if not has_config and not server:
+        server = "hf-gateway"
 
-    for name, entry in cfg.entries.items():
-        row = status_map.get(name)
-        status = row.status if row else EntryStatus.UNKNOWN
+    if server:
+        # REMOTE CONFIG-LESS LIST
+        storage_root = source or Path("/data/hf-serve")
+        console.print(f"Fetching entries from remote server [yellow]{server}[/yellow]...")
 
-        status_style = {
-            EntryStatus.READY: "[green]ready[/]",
-            EntryStatus.SYNCING: "[yellow]syncing[/]",
-            EntryStatus.FAILED: "[red]failed[/]",
-            EntryStatus.UNKNOWN: "[dim]unknown[/]",
-        }.get(status, str(status.value))
+        if not shutil.which("rsync"):
+            err_console.print("[bold red]Error:[/] rsync is not installed or not in PATH")
+            raise typer.Exit(1)
 
-        size = human_size(row.total_size) if row and row.total_size else "-"
-        revision = cfg.resolve_revision(entry)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            remote_path = f"{server}:{storage_root}/entries/"
+            cmd = [
+                "rsync",
+                "-am",
+                "--include=*/",
+                "--include=hf-serve-manifest.json",
+                "--exclude=*",
+                remote_path,
+                tmpdir,
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                err_console.print(f"[bold red]Error listing remote entries:[/] {result.stderr.strip()}")
+                raise typer.Exit(1)
 
-        table.add_row(name, entry.repository, revision, status_style, size)
+            tmp_path = Path(tmpdir)
+            entries_data = []
 
-    console.print(table)
-    state.close()
+            for manifest_path in tmp_path.rglob("hf-serve-manifest.json"):
+                try:
+                    rel = manifest_path.relative_to(tmp_path)
+                    entry_name = rel.parts[0]
+                    rev = rel.parts[2]
+
+                    with open(manifest_path) as f:
+                        manifest_data = json.load(f)
+                    
+                    total_size = manifest_data.get("total_size", 0)
+                    repo = manifest_data.get("repository", "-")
+                    
+                    mtime = manifest_path.stat().st_mtime
+                    mtime_dt = datetime.fromtimestamp(mtime, timezone.utc)
+                    age_delta = datetime.now(timezone.utc) - mtime_dt
+                    
+                    if age_delta.days > 0:
+                        age = f"{age_delta.days}d"
+                    elif age_delta.seconds // 3600 > 0:
+                        age = f"{age_delta.seconds // 3600}h"
+                    else:
+                        age = f"{age_delta.seconds // 60}m"
+
+                    entries_data.append({
+                        "name": entry_name,
+                        "repository": repo,
+                        "revision": rev[:12],
+                        "status": "Ready",
+                        "size": human_size(total_size),
+                        "age": age
+                    })
+                except Exception:
+                    continue
+
+            if not entries_data:
+                console.print("\nNo entries found on remote server.")
+                return
+
+            table = Table(box=None, padding=(0, 2), show_header=True, header_style="bold white")
+            table.add_column("NAME")
+            table.add_column("REPOSITORY")
+            table.add_column("REVISION")
+            table.add_column("STATUS")
+            table.add_column("SIZE")
+            table.add_column("AGE")
+
+            for item in sorted(entries_data, key=lambda x: x["name"]):
+                table.add_row(
+                    item["name"],
+                    item["repository"],
+                    item["revision"],
+                    "[green]" + item["status"] + "[/]",
+                    item["size"],
+                    item["age"]
+                )
+
+            console.print()
+            console.print(table)
+
+    else:
+        # LOCAL CONFIG-BASED LIST
+        cfg, state = _require_config()
+
+        table = Table(box=None, padding=(0, 2), show_header=True, header_style="bold white")
+        table.add_column("NAME")
+        table.add_column("REPOSITORY")
+        table.add_column("REVISION")
+        table.add_column("STATUS")
+        table.add_column("SIZE")
+
+        status_map = {row.entry: row for row in state.list_statuses()}
+
+        for name in sorted(cfg.entries.keys()):
+            entry = cfg.entries[name]
+            row = status_map.get(name)
+            status = row.status if row else EntryStatus.UNKNOWN
+
+            status_style = {
+                EntryStatus.READY: "[green]Ready[/]",
+                EntryStatus.SYNCING: "[yellow]Syncing[/]",
+                EntryStatus.FAILED: "[red]Failed[/]",
+                EntryStatus.UNKNOWN: "[dim]Unknown[/]",
+            }.get(status, str(status.value))
+
+            size = human_size(row.total_size) if row and row.total_size else "-"
+            revision = cfg.resolve_revision(entry)
+            if row and row.commit_hash:
+                revision = row.commit_hash[:12]
+
+            table.add_row(name, entry.repository, revision, status_style, size)
+
+        console.print()
+        console.print(table)
+        state.close()
+
+
+@app.command(name="ls")
+def ls(
+    server: Annotated[
+        Optional[str],
+        typer.Option("--server", help="Remote server hostname for config-less list"),
+    ] = None,
+    source: Annotated[
+        Optional[Path],
+        typer.Option("--source", "-s", help="Remote hf-serve storage root"),
+    ] = None,
+) -> None:
+    """List all configured entries and their sync status."""
+    list_(server=server, source=source)
 
 
 @app.command()
